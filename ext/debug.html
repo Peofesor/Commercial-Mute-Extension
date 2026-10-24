@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Commercial Mute – Debug</title>
+<link rel="stylesheet" href="debug.css">
+</head>
+<body>
+<header>
+  <div>
+    <h1>Commercial Mute <span class="tag">debug</span></h1>
+    <div id="status" class="muted">Idle. Click the extension icon on the stream tab.</div>
+  </div>
+  <div class="buttons">
+    <button id="auto" title="Shortcut: Alt+Shift+P">Auto-mute: <b>ON</b></button>
+    <button id="label" title="Shortcut: A">Mark: <b>GAME</b></button>
+    <button id="relearn">Relearn scoreboard</button>
+    <button id="resetSounds" title="Forget the learned game/ad sounds and your Wrong! fixes">Reset learned sounds</button>
+    <button id="export">Export log</button>
+  </div>
+</header>
+
+<main>
+  <section class="top">
+    <figure>
+      <img id="frame" alt="Captured frame with learned video area (blue) and scoreboard mask (red)">
+      <figcaption>Blue: video area · Red + yellow boxes: learned graphics (scoreboard, channel logo) · Green: unchanged for 40 s+</figcaption>
+    </figure>
+    <div class="cards">
+      <div class="card big">
+        <div class="k">Ad probability</div>
+        <div class="v" id="pAd">–</div>
+        <div id="would" class="pill">not muted</div>
+      </div>
+      <div class="card">
+        <div class="k">Scoreboard</div>
+        <div class="v" id="presence">–</div>
+        <div class="s" id="learn">waiting for video…</div>
+      </div>
+      <div class="card">
+        <div class="k">Audio</div>
+        <div class="row"><span>crowd</span><meter id="crowd" max="1"></meter></div>
+        <div class="row"><span>music</span><meter id="music" max="1"></meter></div>
+        <div class="row"><span>speech</span><meter id="speech" max="1"></meter></div>
+        <div class="s" id="loud">loudness –</div>
+        <div class="s" id="model">audio model loading…</div>
+      </div>
+      <div class="card">
+        <div class="k">Not-a-commercial signals</div>
+        <div class="row2"><span>sounds like game</span><b id="audioGame">–</b></div>
+        <div class="row2"><span>sound fingerprints (game / ads)</span><b id="banks">–</b></div>
+        <div class="row2"><span>matches your Wrong! fixes</span><b id="showAudio">–</b></div>
+        <div class="row2"><span>channel logo / graphic</span><b id="logo">–</b></div>
+        <div class="row2"><span>persistent graphics</span><b id="persist">–</b></div>
+        <div class="row2"><span>text on screen</span><b id="ocrHit">–</b></div>
+        <div class="row2"><span>show score</span><b id="show">–</b></div>
+        <div class="k" style="margin-top:6px">Commercial signals</div>
+        <div class="row2"><span>black+silent cuts (90 s)</span><b id="cuts">–</b></div>
+        <div class="row2"><span>scoreboard gone for</span><b id="absent">–</b></div>
+        <div class="s" id="teams">teams: learning…</div>
+        <div class="s" id="ocrState">OCR loading…</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--p)"></i>ad probability</span>
+      <span><i class="sw" style="background:var(--vis)"></i>scoreboard presence</span>
+      <span><i class="sw" style="background:var(--aud)"></i>audio ad score</span>
+      <span><i class="sw" style="background:var(--show)"></i>show score</span>
+      <span><i class="sw band" style="background:var(--would)"></i>muted</span>
+      <span><i class="sw band" style="background:var(--label)"></i>you marked AD</span>
+      <select id="range">
+        <option value="300">5 min</option>
+        <option value="900" selected>15 min</option>
+        <option value="3600">1 h</option>
+        <option value="14400">4 h</option>
+      </select>
+    </div>
+    <canvas id="chart"></canvas>
+  </section>
+
+  <section>
+    <h2>Top sounds</h2>
+    <ol id="top"></ol>
+    <h2>Last OCR text</h2>
+    <div id="ocrText" class="muted mono">–</div>
+    <h2>Accuracy vs. your marks</h2>
+    <div id="acc" class="muted">Press <b>A</b> (or the Mark button) when a commercial starts and again when the game is back.</div>
+  </section>
+</main>
+<script src="debug.js"></script>
+</body>
+</html>

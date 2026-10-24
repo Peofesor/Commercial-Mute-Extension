@@ -1,0 +1,9 @@
+# Exported debug logs
+commercial-mute-log-*.json
+
+# OS / editor clutter
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+node_modules/
