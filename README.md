@@ -7,7 +7,7 @@ It learns each stream on the fly: the scoreboard and channel logo, what the game
 (commentators, crowd), and what that broadcast's ads sound like. Everything runs locally in your
 browser. No screenshots or audio leave your computer, and there is no account or server.
 
-## Install (for you and friends)
+## Install
 
 1. **Download** this repository: green **Code** button → **Download ZIP**. Unzip it somewhere it
    can stay (Chrome loads the extension from that folder, so don't delete it afterwards).
