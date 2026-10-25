@@ -1,7 +1,6 @@
 # Commercial Mute
 
-A Chrome extension that **mutes commercial breaks** in sports streams (NFL, college football,
-soccer, …) and unmutes when the game is back. Replays, interviews and the halftime show stay on.
+A Chrome extension that **mutes commercial breaks** in sports streams (NFL, college football…) and unmutes when the game is back. Replays, interviews and the halftime show stay on.
 
 It learns each stream on the fly: the scoreboard and channel logo, what the game sounds like
 (commentators, crowd), and what that broadcast's ads sound like. Everything runs locally in your
