@@ -62,8 +62,10 @@ at `chrome://extensions/shortcuts`.
   as the scoreboard is back, or about 5 s after the game sound is back if the scoreboard isn't.
 - If the scoreboard moves (the stream changed its layout), it notices after about a minute of game
   sound without the scoreboard and relearns it.
-- If the debug panel shows only the channel logo learned (yellow box), it keeps looking for the
-  scoreboard in the background; **Relearn scoreboard** forces a fresh start.
+- It tracks the scoreboard and the channel logo separately (yellow and magenta boxes in the debug
+  panel). Either one on screen counts as game, so a replay that hides the score bar stays on.
+- Switched to another stream or channel? Opening a different page relearns everything on its own.
+  Inside the same player, press `Alt+Shift+N`.
 
 How it works and all tuning values: [`ext/README.md`](ext/README.md).
 Third-party libraries and models: [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
