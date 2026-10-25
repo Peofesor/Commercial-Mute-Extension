@@ -86,9 +86,9 @@ chrome.action.onClicked.addListener(async (tab) => {
     // Must be called directly from the user gesture (toolbar click). The id expires within a few
     // seconds, so hand it to the offscreen document right away; badge injection comes after.
     const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
-    const res = await chrome.runtime.sendMessage({ target: 'offscreen', type: 'start', streamId, tabId: tab.id, title: tab.title, autoEnabled });
+    const res = await chrome.runtime.sendMessage({ target: 'offscreen', type: 'start', streamId, tabId: tab.id, title: tab.title, autoEnabled, url: pageKey(tab.url) });
     if (!res || !res.ok) throw new Error(res && res.error ? res.error : 'offscreen document did not respond');
-    await chrome.storage.session.set({ active: { tabId: tab.id }, lastError: null });
+    await chrome.storage.session.set({ active: { tabId: tab.id, url: pageKey(tab.url) }, lastError: null });
     await chrome.action.setTitle({ title: 'Commercial Mute: running (click to stop, right-click for debug panel)' });
     await injectBadge(tab.id);
   } catch (err) {
@@ -105,20 +105,42 @@ async function showError(err) {
   chrome.runtime.sendMessage({ target: 'debug', type: 'status', capturing: false, error: message }).catch(() => {});
 }
 
+// Page address without the #fragment: a change means another stream/channel was opened in the tab.
+function pageKey(url) {
+  return url ? url.split('#')[0] : null;
+}
+
+async function newStream(reason, url) {
+  const { active } = await getState();
+  if (active) chrome.runtime.sendMessage({ target: 'offscreen', type: 'new-stream', reason, url }).catch(() => {});
+}
+
+// Tab capture keeps running when the tab navigates, but the new page is a different stream.
+chrome.tabs.onUpdated.addListener(async (tabId, info) => {
+  if (!info.url) return;
+  const { active } = await getState();
+  if (!active || active.tabId !== tabId || pageKey(info.url) === active.url) return;
+  await chrome.storage.session.set({ active: { ...active, url: pageKey(info.url) } });
+  newStream('Other page opened', pageKey(info.url));
+});
+
 chrome.commands.onCommand.addListener(async (command) => {
   const { active } = await getState();
   if (!active) return;
+  if (command === 'new-stream') return newStream('New stream');
   const action = command === 'toggle-mute' ? 'toggle' : command === 'toggle-auto' ? 'toggle-auto' : null;
   if (action) chrome.runtime.sendMessage({ target: 'offscreen', type: 'override', action }).catch(() => {});
 });
 
 chrome.runtime.onInstalled.addListener(() => {
+  chrome.contextMenus.create({ id: 'new-stream', title: 'Switched stream: learn again', contexts: ['action'] });
   chrome.contextMenus.create({ id: 'debug', title: 'Open debug panel', contexts: ['action'] });
   chrome.contextMenus.create({ id: 'shortcuts', title: 'Change keyboard shortcuts', contexts: ['action'] });
   chrome.contextMenus.create({ id: 'options', title: 'During commercials…', contexts: ['action'] });
 });
 
 chrome.contextMenus.onClicked.addListener((info) => {
+  if (info.menuItemId === 'new-stream') newStream('New stream');
   if (info.menuItemId === 'debug') openDebugWindow();
   if (info.menuItemId === 'shortcuts') chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
   if (info.menuItemId === 'options') chrome.runtime.openOptionsPage();

@@ -34,6 +34,8 @@ const showProfile = new GameAudioProfile({ minN: 5, minSimN: 5, zScale: 1.5 });
 const banks = new AudioBanks();
 const AD_BANK_ABSENT_S = 40;
 const AD_BANK_MUSIC = 0.2;
+const AD_BANK_CONFIDENT_S = 8; // or muted, scoreboard gone this long...
+const AD_BANK_CONFIDENT_GAME = 0.15; // ...and "sounds like the game" at most this
 // Scoreboard lost: learned graphics gone this long while the game plays (sounds like the game, not
 // muted) means the stream's layout changed under the learned position. Relearn the scoreboard.
 const LOST_SCOREBOARD_S = 60;
@@ -51,11 +53,15 @@ let label = 'game'; // user's manual label for the current moment
 let lastVision = null;
 let lastAudio = null;
 let lastVideoSize = '';
+let learnedUrl = null; // page the current learning belongs to (kept while the extension is off)
 let lastOcrLearn = 0;
 let audioErrors = 0;
 let wasLearned = false;
 let lastFound = 0;
+let lastRoles = '';
+let lastDropped = 0;
 let lastDecision = { muted: false };
+let newStream = false; // marks the next history record (chart shows a line there)
 
 function audioStatus() {
   return {
@@ -85,7 +91,7 @@ function broadcast(msg) {
   chrome.runtime.sendMessage({ target: 'debug', ...msg }).catch(() => {});
 }
 
-async function start(streamId, title, tabId, autoEnabled) {
+async function start(streamId, title, tabId, autoEnabled, url) {
   stop();
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId: streamId } },
@@ -120,12 +126,19 @@ async function start(streamId, title, tabId, autoEnabled) {
 
   const s = { stream, audioCtx, gain, resampler, title, tabId, timers: [], audioBusy: false };
   session = s;
-  resetDetection();
+  // Same page as last time (turned off and on again): keep what was learned about this stream.
+  const resume = !!url && url === learnedUrl && (wasLearned || audioProfile.ready);
+  if (resume) resumeDetection();
+  else resetDetection();
+  learnedUrl = url;
   controller.setAuto(autoEnabled !== false);
   controller.override = null;
   controller.muted = false;
   controller.takeEvents();
-  pushState({ flash: 'Commercial Mute is on: learning the scoreboard (about 30 s of game)' });
+  pushState({
+    flash: resume ? 'Commercial Mute is on: using what it learned about this stream'
+      : 'Commercial Mute is on: learning the scoreboard (about 30 s of game)',
+  });
 
   s.timers.push(setInterval(() => sampleFrame(), FRAME_INTERVAL_MS));
   s.timers.push(setInterval(() => sampleThumb(), THUMB_INTERVAL_MS));
@@ -154,8 +167,34 @@ function resetDetection() {
   lastOcrLearn = 0;
   wasLearned = false;
   lastFound = 0;
+  lastRoles = '';
+  lastDropped = 0;
   lastDecision = { muted: false };
   lostSecs = 0;
+}
+
+// Keeps the learned scoreboard, logo, game/ad sound, your Wrong! fixes and team names; only what
+// describes the moment (break timing, cuts, absence) starts over.
+function resumeDetection() {
+  overlay.resetStats();
+  overlay.streak.fill(0);
+  overlay.prev = null;
+  cuts.reset();
+  decision.resume();
+  lastVision = lastAudio = null;
+  lastDecision = { muted: false, logoIgnored: lastDecision.logoIgnored };
+  lostSecs = 0;
+}
+
+// Switched to another stream/channel in the same tab: its scoreboard, logo, sound and team names are
+// all different, so everything is learned again. Capture keeps running.
+function startNewStream(reason, url) {
+  if (!session) return;
+  if (url) learnedUrl = url;
+  resetDetection();
+  controller.override = null;
+  newStream = true;
+  pushState({ flash: `${reason}: learning the scoreboard and channel logo again` });
 }
 
 function resetSounds() {
@@ -179,15 +218,24 @@ function pushState(extra = {}) {
     .catch(() => {});
 }
 
-// Learned scoreboard currently off screen. A manual mute only teaches ad sound then, so muting
+// How much of the broadcast's graphics is on screen: the scoreboard, or the channel logo once it's
+// clearly visible (and not ignored as a watermark). null while nothing is learned.
+function graphicsPresence(v = lastVision) {
+  if (!v || !v.learned) return null;
+  const logo = lastDecision.logoIgnored ? null : v.logoPresence;
+  if (v.scorePresence == null && logo == null) return null;
+  return Math.max(v.scorePresence ?? 0, logo != null && logo >= 0.8 ? logo : 0);
+}
+
+// Scoreboard and logo currently off screen. A manual mute only teaches ad sound then, so muting
 // annoying commentary during play doesn't teach the game sound as an ad.
 function scoreboardGone() {
-  const v = lastVision;
-  return !!(v && v.learned && v.presence != null && v.presence < 0.4);
+  const g = graphicsPresence();
+  return g != null && g < 0.4;
 }
 
 function handleOverride(action) {
-  const presence = lastVision && lastVision.learned ? lastVision.presence : null;
+  const presence = graphicsPresence();
   let changed = false;
   if (action === 'toggle') changed = controller.toggle(lastDecision.muted, presence);
   else if (action === 'wrong') changed = controller.toggle(lastDecision.muted, presence, true);
@@ -266,13 +314,13 @@ async function runOcr() {
   if (!session || !ocr.ready || ocr.busy || !v || !v.learned || video.readyState < 2) return;
   const now = Date.now();
   try {
-    if (v.presence >= 0.6 && v.maskBox && now - lastOcrLearn > OCR_LEARN_EVERY_MS) {
+    if (v.scorePresence >= 0.6 && v.scoreBox && now - lastOcrLearn > OCR_LEARN_EVERY_MS) {
       lastOcrLearn = now;
-      const b = v.maskBox;
+      const b = v.scoreBox; // team names are on the score bar, not the logo
       const pad = { x0: Math.max(0, b.x0 - 4), y0: Math.max(0, b.y0 - 3), x1: Math.min(FRAME_W, b.x1 + 4), y1: Math.min(FRAME_H, b.y1 + 3) };
       const area = videoArea(pad);
       await ocr.learnFromScoreboard(await cropBlob(area, Math.min(1600, area.w * 2)));
-    } else if (v.presence < 0.4) {
+    } else if (scoreboardGone()) {
       await ocr.scan(await cropBlob(videoArea(overlay.rect), 1280), now);
     }
   } catch (err) {
@@ -290,14 +338,18 @@ async function sampleAudio(s) {
     try {
       const res = await audioClassifier.classify(samples);
       const v = lastVision;
-      // Only learn the game sound once a scoreboard-sized graphic is learned: a small network logo
-      // alone also shows up in the network's promos during breaks.
-      const isGame = !!(v && v.learned && v.complete && v.presence >= 0.7);
+      // Only learn the game sound while the scoreboard is up: the network logo alone also shows up
+      // in the network's promos during breaks, and stays on in studio segments.
+      const isGame = !!(v && v.learned && v.scorePresence >= 0.7);
       const { sim, audioGame } = audioProfile.observe(res.embedding, isGame, rmsDb);
       const show = showProfile.observe(res.embedding, controller.learningShow, rmsDb);
       if (isGame && gameTick++ % 2 === 0) banks.add('game', res.embedding);
-      const autoAd = (lastDecision.absentSecs || 0) >= AD_BANK_ABSENT_S && !controller.learningShow &&
-        !(show.audioGame >= 0.5) && (res.music ?? 0) >= AD_BANK_MUSIC;
+      const notShow = !controller.learningShow && !(show.audioGame >= 0.5) && (res.music ?? 0) >= AD_BANK_MUSIC;
+      // Also while confidently muted: scoreboard gone a while and nothing like the game sound. So the
+      // first break already teaches what the ads sound like, not only breaks with music after 40 s.
+      const confident = lastDecision.muted && (lastDecision.absentSecs || 0) >= AD_BANK_CONFIDENT_S &&
+        audioGame != null && audioGame <= AD_BANK_CONFIDENT_GAME;
+      const autoAd = notShow && ((lastDecision.absentSecs || 0) >= AD_BANK_ABSENT_S || confident);
       const adLike = autoAd || (controller.learningAd && scoreboardGone());
       if (adLike) banks.add('ad', res.embedding);
       const two = banks.score(res.embedding);
@@ -338,8 +390,9 @@ function record() {
   const ocrHit = ocr.hitActive(now);
   const signals = {
     learned: !!v.learned,
-    presence: v.learned ? v.presence : null,
+    scorePresence: v.learned ? v.scorePresence : null,
     logoPresence: v.learned ? v.logoPresence : null,
+    logoBox: v.learned ? v.logoBox : null,
     // "Sounds like the broadcast": the game itself, or show content you confirmed with Wrong!
     audioGame: a.audioGame == null ? null : Math.max(a.audioGame, a.showAudio != null && a.showAudio >= 0.5 ? a.showAudio : 0),
     crowd: a.crowd ?? null,
@@ -350,6 +403,7 @@ function record() {
     blackCuts: cut.blackCuts,
     persistentPx: v.persistentPx || 0,
     ocrHit,
+    adReady: banks.ready, // this broadcast's ad sound is learned
   };
   const d = decision.step(signals);
   lastDecision = d;
@@ -363,24 +417,37 @@ function record() {
     lastOcrLearn = 0;
     pushState({ flash: 'Scoreboard moved: relearning it' });
   }
-  if (controller.tick(d.muted, signals.presence)) {
+  if (controller.tick(d.muted, graphicsPresence(v))) {
     applyMute();
     pushState();
   }
+  const roles = !signals.learned ? '' : `${v.complete ? 'score' : ''}+${v.logoBox ? 'logo' : ''}`;
   if (signals.learned && !wasLearned) {
     wasLearned = true;
     lastFound = v.found || 0;
-    pushState({ flash: v.complete ? 'Scoreboard learned: auto-mute is active' : 'Only the channel logo so far: still looking for the scoreboard' });
+    lastDropped = v.dropped || 0;
+    pushState({
+      flash: !v.complete ? 'Only the channel logo so far: still looking for the scoreboard'
+        : v.logoBox ? 'Scoreboard and channel logo learned: auto-mute is active'
+        : 'Scoreboard learned: auto-mute is active (still looking for a channel logo)',
+    });
   } else if (!signals.learned && wasLearned) {
     wasLearned = false;
   }
-  if (signals.learned && (v.found || 0) > lastFound) {
+  if (signals.learned && (v.dropped || 0) > lastDropped) {
+    lastDropped = v.dropped;
+    pushState({ flash: 'Scoreboard changed: looking for the new one (channel logo still tracked)' });
+  } else if (signals.learned && (v.found || 0) > lastFound) {
     lastFound = v.found;
-    pushState({ flash: v.complete ? 'Found the scoreboard: auto-mute is fully active' : 'Found another on-screen graphic' });
+    const flash = roles === lastRoles ? 'Found another on-screen graphic'
+      : !lastRoles.startsWith('score') && v.complete ? 'Found the scoreboard: auto-mute is fully active' : 'Found the channel logo';
+    pushState({ flash });
   }
+  lastRoles = roles;
   const events = controller.takeEvents();
   const rec = {
     t: now,
+    newStream: newStream || null,
     label,
     learned: signals.learned,
     frozen: !!v.frozen,
@@ -389,9 +456,18 @@ function record() {
     maskSize: v.maskSize ?? 0,
     complete: !!v.complete,
     presenceRaw: v.presenceRaw ?? null,
-    presence: signals.presence,
+    presence: v.learned ? v.presence : null,
+    scorePresence: signals.scorePresence,
     logoPresence: signals.logoPresence,
-    regions: v.regions ? v.regions.map((r) => ({ size: r.size, presence: r.presence == null ? null : Math.round(r.presence * 100) / 100, box: r.box })) : null,
+    logoIgnored: d.logoIgnored,
+    bgLast: v.bgLast ?? null,
+    boxLearning: !!v.boxLearning,
+    userBoxes: v.userBoxes ?? null,
+    boxFound: v.boxFound ?? null,
+    bgIn: v.bgIn ?? null,
+    scoreSize: v.scoreSize ?? 0,
+    logoSize: v.logoSize ?? 0,
+    regions: v.regions ? v.regions.map((r) => ({ size: r.size, role: r.role, presence: r.presence == null ? null : Math.round(r.presence * 100) / 100, box: r.box })) : null,
     absentSecs: d.absentSecs,
     rmsDb: signals.rmsDb,
     crowd: signals.crowd,
@@ -427,6 +503,7 @@ function record() {
     events: events.length ? events : null,
     audioModel: audioStatus().audioModel,
   };
+  newStream = false;
   history.push(rec);
   if (history.length > MAX_HISTORY) history.splice(0, history.length - MAX_HISTORY);
   broadcast({ type: 'stats', rec });
@@ -456,11 +533,11 @@ function sendPreview() {
     }
   }
   previewCtx.putImageData(img, 0, 0);
-  // Each learned graphic (scoreboard, channel logo, ...) in yellow.
-  previewCtx.strokeStyle = '#fd3';
+  // Each learned graphic: scoreboard parts in yellow, the channel logo in magenta.
   previewCtx.lineWidth = 1;
   for (const g of overlay.regions) {
     const b = g.box;
+    previewCtx.strokeStyle = g.role === 'logo' ? '#f5f' : '#fd3';
     previewCtx.strokeRect(b.x0 - 1.5, b.y0 - 1.5, b.x1 - b.x0 + 2, b.y1 - b.y0 + 2);
   }
   const r = overlay.rect;
@@ -487,7 +564,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.target !== 'offscreen') return;
   switch (msg.type) {
     case 'start':
-      start(msg.streamId, msg.title, msg.tabId, msg.autoEnabled).then(
+      start(msg.streamId, msg.title, msg.tabId, msg.autoEnabled, msg.url).then(
         () => sendResponse({ ok: true }),
         (err) => {
           broadcast({ type: 'status', capturing: false, error: String(err) });
@@ -515,6 +592,17 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       resetSounds();
       sendResponse({ ok: true });
       break;
+    case 'set-boxes': {
+      // Edited in the debug panel: the scoreboard and logo are exactly these areas from now on.
+      const ok = overlay.setUserBoxes(msg.boxes || []);
+      if (ok) lastOcrLearn = 0;
+      sendResponse({ ok, error: ok ? null : 'wait until the scoreboard is learned' });
+      break;
+    }
+    case 'new-stream':
+      startNewStream(msg.reason || 'New stream', msg.url);
+      sendResponse({ ok: true });
+      break;
     case 'label':
       label = msg.label;
       sendResponse({ ok: true });
@@ -522,6 +610,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     case 'get-history':
       sendResponse({
         history,
+        bgDiag: overlay.bgDiag,
         label,
         capturing: !!session,
         ...controller.state(),
