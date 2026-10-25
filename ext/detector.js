@@ -12,6 +12,8 @@
   const ABSENT = 0.4; // below this counts as "gone"
   const REPLAY_MAX_S = 10; // absence shorter than this contributes nothing
   const ABSENCE_FULL_S = 40; // absence this long is fully "not a replay"
+  const PARTLY_S = 3; // scoreboard at least ABSENT this many seconds in a row: still on screen, absence
+  //                     starts over (a half-matching scoreboard otherwise adds up every dip; ads stay below ~0.2)
   // Decision timing. Tuned on three labeled games (two college, one NFL), then tightened on a
   // labeled college basketball game where the scoreboard was lost after the first break, so the
   // audio alone had to decide: mute within ~1-3 s of the break, no mutes during play.
@@ -246,6 +248,7 @@
       this.musicWin = [];
       this.lastBreakCuts = 0;
       this.cutAgo = Infinity;
+      this.partlySecs = 0;
     }
 
     // Call once per second. s: { learned, presence, logoPresence, audioGame, music, speech, rmsDb,
@@ -255,7 +258,8 @@
       const logoOn = vis && this.cfg.logoVisible != null && s.logoPresence != null && s.logoPresence >= this.cfg.logoVisible;
       const seen = vis && (s.presence >= PRESENT || logoOn); // broadcast graphics on screen
       // Presence is briefly unknown right after a graphic is added to the learned scoreboard: hold.
-      if (!s.learned || seen) this.absentSecs = 0;
+      this.partlySecs = vis && s.presence >= ABSENT ? this.partlySecs + 1 : vis ? 0 : this.partlySecs;
+      if (!s.learned || seen || this.partlySecs >= PARTLY_S) this.absentSecs = 0;
       else if (vis && s.presence < ABSENT) this.absentSecs++;
 
       const push = (win, v) => {

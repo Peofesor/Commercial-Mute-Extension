@@ -34,6 +34,14 @@
   const EDGE_KEEP = 0.35; // current edge must be >= this fraction of the learned edge
   const PRESENCE_ALPHA = 0.3; // EMA smoothing of the presence score
   const ADAPT = 0.02; // template drift rate while the overlay is clearly present
+  // Stale pixels: part of a learned graphic that changed for good (e.g. a score bar that changed
+  // layout) never matches again, so presence sticks around 0.5 and never counts as visible. Every
+  // 30 s of frames where the overlay is at least partly there (ads stay below ~0.2), pixels that
+  // matched in fewer than 20% of them are dropped, if the overlay matched less than 70% on average.
+  const PRUNE_MIN_RAW = 0.3;
+  const PRUNE_FRAMES = 60;
+  const PRUNE_BELOW = 0.7;
+  const PRUNE_HIT = 0.2;
   const PERSIST_FRAMES = 80; // 40 s at 2 fps: longer than a single 30 s commercial
   const PERSIST_DIFF = 8; // max luma change per frame for a pixel to count as unchanged
   const MAX_PERSIST_FRAC = 0.3; // more than this unchanged means the video froze, not a graphic
@@ -76,6 +84,9 @@
       this.frozen = false;
       this.bgPresSum = 0;
       this.found = 0; // graphics added by the background search
+      this.hitCount = null;
+      this.pruneFrames = 0;
+      this.pruneSum = 0;
     }
 
     resetStats() {
@@ -214,6 +225,18 @@
         tplEdge[k] = this.stillEdge[i] / this.stillCount[i];
         this.inMask[i] = 1;
       }
+      this.setMask(mask, tplLuma, tplEdge);
+    }
+
+    // Keeps only the mask entries at indices `ks` (see PRUNE_*).
+    keepInMask(ks) {
+      for (const i of this.mask) this.inMask[i] = 0;
+      const mask = Int32Array.from(ks, (k) => this.mask[k]);
+      for (const i of mask) this.inMask[i] = 1;
+      this.setMask(mask, Float32Array.from(ks, (k) => this.tplLuma[k]), Float32Array.from(ks, (k) => this.tplEdge[k]));
+    }
+
+    setMask(mask, tplLuma, tplEdge) {
       let bx0 = Infinity, by0 = Infinity, bx1 = -1, by1 = -1;
       for (const i of mask) {
         const x = i % this.w, y = (i / this.w) | 0;
@@ -225,6 +248,26 @@
       this.maskBox = { x0: bx0, y0: by0, x1: bx1 + 1, y1: by1 + 1 };
       this.regions = this.findRegions(mask);
       this.presence = null;
+      this.hitCount = new Uint16Array(mask.length);
+      this.pruneFrames = 0;
+      this.pruneSum = 0;
+    }
+
+    prune(raw, hit) {
+      if (raw < PRUNE_MIN_RAW) return;
+      this.pruneFrames++;
+      this.pruneSum += raw;
+      for (let k = 0; k < hit.length; k++) this.hitCount[k] += hit[k];
+      if (this.pruneFrames < PRUNE_FRAMES) return;
+      const stale = this.pruneSum / this.pruneFrames < PRUNE_BELOW;
+      const keep = [];
+      if (stale) for (let k = 0; k < hit.length; k++) if (this.hitCount[k] >= PRUNE_HIT * this.pruneFrames) keep.push(k);
+      if (stale && keep.length >= MIN_MASK && keep.length < this.mask.length) this.keepInMask(keep);
+      else {
+        this.hitCount.fill(0);
+        this.pruneFrames = 0;
+        this.pruneSum = 0;
+      }
     }
 
     backgroundSearch() {
@@ -338,6 +381,7 @@
       }
       this.presenceRaw = raw;
       this.presence = this.presence == null ? raw : this.presence + PRESENCE_ALPHA * (raw - this.presence);
+      this.prune(raw, hit);
 
       // Follow slow changes (e.g. lighting, score digits) while the overlay is clearly there.
       if (raw > 0.6) {
