@@ -14,6 +14,7 @@
   <div class="buttons">
     <button id="auto" title="Shortcut: Alt+Shift+P">Auto-mute: <b>ON</b></button>
     <button id="label" title="Shortcut: A">Mark: <b>GAME</b></button>
+    <button id="newStream" title="Switched stream/channel: learn the scoreboard, logo and sound again (Alt+Shift+N)">New stream</button>
     <button id="relearn">Relearn scoreboard</button>
     <button id="resetSounds" title="Forget the learned game/ad sounds and your Wrong! fixes">Reset learned sounds</button>
     <button id="export">Export log</button>
@@ -23,8 +24,25 @@
 <main>
   <section class="top">
     <figure>
-      <img id="frame" alt="Captured frame with learned video area (blue) and scoreboard mask (red)">
-      <figcaption>Blue: video area · Red + yellow boxes: learned graphics (scoreboard, channel logo) · Green: unchanged for 40 s+</figcaption>
+      <div class="frameWrap">
+        <img id="frame" alt="Captured frame with learned video area (blue) and scoreboard mask (red)">
+        <canvas id="draw"></canvas>
+      </div>
+      <figcaption>Blue: video area · Red: learned graphics · Yellow box: scoreboard · Magenta box: channel logo · Green: unchanged for 40 s+</figcaption>
+      <div class="boxbar">
+        <button id="editBoxes" title="Move, resize, relabel or delete the detected boxes">Edit boxes</button>
+        <span id="editTools" hidden>
+          <button id="addScore" data-role="score">+ Scoreboard box</button>
+          <button id="addLogo" data-role="logo">+ Logo box</button>
+          <button id="toggleRole" disabled>Make logo</button>
+          <button id="deleteBox" disabled>Delete</button>
+          <button id="applyBoxes" class="primary">Apply</button>
+          <button id="cancelBoxes">Cancel</button>
+          <button id="autoBoxes" title="Forget your edits: boxes are found automatically again">Automatic</button>
+        </span>
+        <span id="drawHint" class="muted"></span>
+      </div>
+      <ol id="boxList" hidden></ol>
     </figure>
     <div class="cards">
       <div class="card big">
@@ -33,8 +51,10 @@
         <div id="would" class="pill">not muted</div>
       </div>
       <div class="card">
-        <div class="k">Scoreboard</div>
-        <div class="v" id="presence">–</div>
+        <div class="pair">
+          <div><div class="k">Scoreboard</div><div class="v" id="presence">–</div></div>
+          <div><div class="k">Channel logo</div><div class="v" id="logoV">–</div></div>
+        </div>
         <div class="s" id="learn">waiting for video…</div>
       </div>
       <div class="card">
@@ -50,7 +70,7 @@
         <div class="row2"><span>sounds like game</span><b id="audioGame">–</b></div>
         <div class="row2"><span>sound fingerprints (game / ads)</span><b id="banks">–</b></div>
         <div class="row2"><span>matches your Wrong! fixes</span><b id="showAudio">–</b></div>
-        <div class="row2"><span>channel logo / graphic</span><b id="logo">–</b></div>
+        <div class="row2"><span>channel logo</span><b id="logo">–</b></div>
         <div class="row2"><span>persistent graphics</span><b id="persist">–</b></div>
         <div class="row2"><span>text on screen</span><b id="ocrHit">–</b></div>
         <div class="row2"><span>show score</span><b id="show">–</b></div>
@@ -66,11 +86,13 @@
   <section>
     <div class="legend">
       <span><i class="sw" style="background:var(--p)"></i>ad probability</span>
-      <span><i class="sw" style="background:var(--vis)"></i>scoreboard presence</span>
+      <span><i class="sw" style="background:var(--vis)"></i>scoreboard</span>
+      <span><i class="sw" style="background:var(--logo)"></i>channel logo</span>
       <span><i class="sw" style="background:var(--aud)"></i>audio ad score</span>
       <span><i class="sw" style="background:var(--show)"></i>show score</span>
       <span><i class="sw band" style="background:var(--would)"></i>muted</span>
       <span><i class="sw band" style="background:var(--label)"></i>you marked AD</span>
+      <span><i class="sw mark"></i>new stream</span>
       <select id="range">
         <option value="300">5 min</option>
         <option value="900" selected>15 min</option>
