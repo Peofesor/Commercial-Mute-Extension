@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Commercial Mute",
-  "version": "1.5.0",
+  "version": "1.6.1",
   "description": "Mutes commercial breaks in sports streams. Learns each stream's scoreboard and sound; replays, interviews and the halftime show stay on.",
   "minimum_chrome_version": "116",
   "icons": {
@@ -20,6 +20,10 @@
   "host_permissions": [
     "<all_urls>"
   ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
   "background": {
     "service_worker": "sw.js"
   },

@@ -31,9 +31,26 @@ arrow on Commercial Mute in `chrome://extensions`.
 
 | Shortcut / button | What it does |
 |---|---|
-| `Alt+Shift+M` / **Unmute** | Unmute now and ignore the rest of this break (or mute now if it isn't muted) |
+| `Alt+Shift+M` / **Unmute** | Unmute now and ignore the rest of this break (or mute now if it isn't muted; during a missed commercial it also learns that ad's sound) |
 | **Wrong!** | Same, plus it learns from the mistake |
 | `Alt+Shift+P` / **Pause auto** | Turn auto-mute off until you resume |
+
+### During commercials (optional)
+
+Right-click the toolbar icon → **During commercials…** to pick what else happens while a break
+is muted:
+
+| Option | What it does |
+|---|---|
+| **Just mute** | Default. Nothing else. |
+| **YouTube video or playlist** | Opens it next to the game and plays it; paused when the game is back, resumed next break. |
+| **Spotify playlist, album or podcast** | Opens the Spotify web player and presses play (sign in at open.spotify.com first). |
+| **A tab you already have open** | Switches to it and resumes what it was playing (YouTube Music, SoundCloud, Twitch…). |
+
+It only switches tabs if you're watching the game at that moment, and only switches back if
+you're still on that tab. Switching tabs leaves the player's fullscreen. **Start a test break**
+on that page shows what happens without waiting for a commercial. If Chrome blocks autoplay on a
+music tab, click play there once; after that it resumes on its own.
 
 Right-click the toolbar icon → **Open debug panel** to see what it detects. Change the shortcuts
 at `chrome://extensions/shortcuts`.
@@ -41,8 +58,10 @@ at `chrome://extensions/shortcuts`.
 ## Good to know
 
 - The first break of a session can be caught late: it's still learning the game and ad sounds.
-- It waits ~10 s after the scoreboard disappears before muting, so the lead-in music before a
-  break stays audible.
+- It mutes 0–3 s into a break (the lead-in music counts as the break) and unmutes as soon
+  as the scoreboard is back, or about 5 s after the game sound is back if the scoreboard isn't.
+- If the scoreboard moves (the stream changed its layout), it notices after about a minute of game
+  sound without the scoreboard and relearns it.
 - If the debug panel shows only the channel logo learned (yellow box), it keeps looking for the
   scoreboard in the background; **Relearn scoreboard** forces a fresh start.
 

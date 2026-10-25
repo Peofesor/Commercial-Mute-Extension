@@ -3,7 +3,8 @@
 //   hotkey / Unmute while auto-muted  -> unmute now and ignore the rest of this break
 //                                        (auto-mute works again once the detector says the break is over)
 //   hotkey while not muted            -> mute manually until you press again, or the scoreboard
-//                                        disappears and comes back
+//                                        disappears and comes back; with the scoreboard gone, what's
+//                                        playing is learned as a commercial
 //   Wrong!                            -> same as the hotkey, logged as a detector mistake, and (while
 //                                        muted) what's playing is learned as "not a commercial"
 //   Pause                             -> no auto-mute until resumed
@@ -18,6 +19,7 @@
       this.override = null; // null | 'skip' (stay unmuted this break) | 'manual' (stay muted)
       this.muted = false;
       this.sawAbsent = false;
+      this.manualInBreak = false; // manual mute pressed while the scoreboard was gone
       this.wrongSkip = false; // current 'skip' came from Wrong!: what's playing is not a commercial
       this.events = [];
     }
@@ -44,6 +46,7 @@
       this.override = 'manual';
       this.wrongSkip = false;
       this.sawAbsent = presence != null && presence < ABSENT;
+      this.manualInBreak = this.sawAbsent;
       return this.set(true, wrong ? 'wrong-unmute' : 'user-mute', true);
     }
 
@@ -76,6 +79,12 @@
     // True while you've said "this is not a commercial": the audio is learned as show content.
     get learningShow() {
       return this.override === 'skip' && this.wrongSkip;
+    }
+
+    // True while you've muted a commercial it missed (pressed with the scoreboard gone): the audio
+    // is learned as ad sound until the scoreboard is back.
+    get learningAd() {
+      return this.override === 'manual' && this.manualInBreak;
     }
 
     state() {

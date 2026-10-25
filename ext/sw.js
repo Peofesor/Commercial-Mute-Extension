@@ -1,6 +1,9 @@
 // Service worker: toolbar click starts/stops capture of the current tab, hotkeys, toolbar badge,
 // and relaying the mute state to the on-screen badge in the stream tab.
-// Capture, analysis and muting run in the offscreen document.
+// Capture, analysis and muting run in the offscreen document. Break actions (music during ads)
+// are in break-runner.js.
+
+importScripts('break-actions.js', 'break-runner.js');
 
 async function getState() {
   const { active = null, debugWindowId = null } = await chrome.storage.session.get(['active', 'debugWindowId']);
@@ -49,6 +52,7 @@ async function stopCapture() {
     // offscreen document not running
   }
   await chrome.storage.session.set({ active: null });
+  queueBreak(() => endBreak());
   await setBadge(null);
   await chrome.action.setTitle({ title: 'Commercial Mute: click to start on this tab (right-click for debug panel)' });
 }
@@ -63,6 +67,7 @@ async function injectBadge(tabId) {
 }
 
 async function relayState(state) {
+  onStreamState(state);
   await setBadge(state);
   if (state.tabId == null) return;
   if (!state.stopped) await injectBadge(state.tabId);
@@ -110,18 +115,24 @@ chrome.commands.onCommand.addListener(async (command) => {
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({ id: 'debug', title: 'Open debug panel', contexts: ['action'] });
   chrome.contextMenus.create({ id: 'shortcuts', title: 'Change keyboard shortcuts', contexts: ['action'] });
+  chrome.contextMenus.create({ id: 'options', title: 'During commercials…', contexts: ['action'] });
 });
 
 chrome.contextMenus.onClicked.addListener((info) => {
   if (info.menuItemId === 'debug') openDebugWindow();
   if (info.menuItemId === 'shortcuts') chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
+  if (info.menuItemId === 'options') chrome.runtime.openOptionsPage();
 });
 
-chrome.runtime.onMessage.addListener((msg) => {
+chrome.runtime.onMessage.addListener((msg, sender) => {
   if (msg.target !== 'sw') return;
   if (msg.type === 'capture-ended') {
     chrome.storage.session.set({ active: null });
+    queueBreak(() => endBreak());
     setBadge(null);
+  } else if (msg.type === 'break-test' && sender.tab) {
+    // Options page "Try it": the options tab plays the part of the stream.
+    queueBreak(() => (msg.on ? startBreak(sender.tab.id) : endBreak()));
   } else if (msg.type === 'state') {
     if ('autoEnabled' in msg) chrome.storage.local.set({ autoEnabled: msg.autoEnabled });
     relayState(msg);

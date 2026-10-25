@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Commercial Mute – During commercials</title>
+<link rel="stylesheet" href="options.css">
+</head>
+<body>
+<main>
+  <header>
+    <img src="icons/icon48.png" alt="" width="32" height="32">
+    <div>
+      <h1>During commercials</h1>
+      <p class="dim">Commercials are always muted. Optionally, do something with the break too.</p>
+    </div>
+  </header>
+
+  <fieldset id="modes" aria-label="What happens during a commercial"></fieldset>
+
+  <section id="tabOptions" class="group" hidden>
+    <h2>Switching tabs</h2>
+    <label class="check"><input type="checkbox" data-key="switchTab"> Switch to it when the break starts
+      <span class="hint">Only if you're watching the game tab at that moment. Switching leaves the player's fullscreen.</span></label>
+    <label class="check"><input type="checkbox" data-key="returnToGame"> Switch back to the game when it's back
+      <span class="hint">Only if you're still on that tab, so it won't pull you away from something else.</span></label>
+    <label class="check" data-media><input type="checkbox" data-key="pauseOnReturn"> Pause it when the game is back</label>
+    <label class="check" data-opened><input type="checkbox" data-key="closeOnReturn"> Close the tab when the game is back
+      <span class="hint">Otherwise it stays open and continues next break.</span></label>
+  </section>
+
+  <section class="group try">
+    <div>
+      <h2>Try it</h2>
+      <p class="dim" id="tryHint"></p>
+    </div>
+    <button id="try" type="button"></button>
+  </section>
+
+  <p class="saved dim" id="saved" aria-live="polite"></p>
+</main>
+
+<template id="modeTpl">
+  <label class="mode">
+    <input type="radio" name="mode">
+    <span class="body">
+      <span class="label"></span>
+      <span class="desc"></span>
+      <span class="extra"></span>
+    </span>
+  </label>
+</template>
+
+<script src="break-actions.js"></script>
+<script src="options.js"></script>
+</body>
+</html>

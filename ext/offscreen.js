@@ -34,6 +34,11 @@ const showProfile = new GameAudioProfile({ minN: 5, minSimN: 5, zScale: 1.5 });
 const banks = new AudioBanks();
 const AD_BANK_ABSENT_S = 40;
 const AD_BANK_MUSIC = 0.2;
+// Scoreboard lost: learned graphics gone this long while the game plays (sounds like the game, not
+// muted) means the stream's layout changed under the learned position. Relearn the scoreboard.
+const LOST_SCOREBOARD_S = 60;
+const LOST_GAME_AUDIO = 0.7;
+let lostSecs = 0;
 let gameTick = 0;
 const cuts = new CutDetector();
 const ocr = new OcrReader();
@@ -150,6 +155,7 @@ function resetDetection() {
   wasLearned = false;
   lastFound = 0;
   lastDecision = { muted: false };
+  lostSecs = 0;
 }
 
 function resetSounds() {
@@ -173,6 +179,13 @@ function pushState(extra = {}) {
     .catch(() => {});
 }
 
+// Learned scoreboard currently off screen. A manual mute only teaches ad sound then, so muting
+// annoying commentary during play doesn't teach the game sound as an ad.
+function scoreboardGone() {
+  const v = lastVision;
+  return !!(v && v.learned && v.presence != null && v.presence < 0.4);
+}
+
 function handleOverride(action) {
   const presence = lastVision && lastVision.learned ? lastVision.presence : null;
   let changed = false;
@@ -182,7 +195,8 @@ function handleOverride(action) {
   else if (action === 'resume') changed = controller.setAuto(true);
   else if (action === 'toggle-auto') changed = controller.setAuto(!controller.autoEnabled);
   applyMute();
-  const flash = action === 'wrong' ? 'Thanks, logged as a mistake' : action === 'pause' || (action === 'toggle-auto' && !controller.autoEnabled) ? 'Auto-mute paused' : action === 'resume' || action === 'toggle-auto' ? 'Auto-mute resumed' : null;
+  const flash = action === 'wrong' ? 'Thanks, logged as a mistake' :
+    action === 'toggle' && controller.learningAd && scoreboardGone() ? 'Muted: learning this commercial' : action === 'pause' || (action === 'toggle-auto' && !controller.autoEnabled) ? 'Auto-mute paused' : action === 'resume' || action === 'toggle-auto' ? 'Auto-mute resumed' : null;
   pushState(flash ? { flash } : {});
   return changed;
 }
@@ -282,8 +296,9 @@ async function sampleAudio(s) {
       const { sim, audioGame } = audioProfile.observe(res.embedding, isGame, rmsDb);
       const show = showProfile.observe(res.embedding, controller.learningShow, rmsDb);
       if (isGame && gameTick++ % 2 === 0) banks.add('game', res.embedding);
-      const adLike = (lastDecision.absentSecs || 0) >= AD_BANK_ABSENT_S && !controller.learningShow &&
+      const autoAd = (lastDecision.absentSecs || 0) >= AD_BANK_ABSENT_S && !controller.learningShow &&
         !(show.audioGame >= 0.5) && (res.music ?? 0) >= AD_BANK_MUSIC;
+      const adLike = autoAd || (controller.learningAd && scoreboardGone());
       if (adLike) banks.add('ad', res.embedding);
       const two = banks.score(res.embedding);
       const fp = fingerprint(res.embedding);
@@ -291,7 +306,9 @@ async function sampleAudio(s) {
       audio = {
         rmsDb, ...res, sim, showAudio: show.audioGame, fp,
         oneClass: audioGame, // "close enough to the game" only
-        audioGame: two ? two.audioGame : audioGame, // game-vs-ad comparison once both are learned
+        // Once both are learned, the average of the two: the game-vs-ad comparison keeps the game
+        // audio high, "close enough to the game" catches talky ads the ad bank hasn't heard yet.
+        audioGame: two ? (audioGame == null ? two.audioGame : (two.audioGame + audioGame) / 2) : audioGame,
         simGame: two ? two.simGame : null,
         simAd: two ? two.simAd : null,
       };
@@ -327,6 +344,7 @@ function record() {
     audioGame: a.audioGame == null ? null : Math.max(a.audioGame, a.showAudio != null && a.showAudio >= 0.5 ? a.showAudio : 0),
     crowd: a.crowd ?? null,
     music: a.music ?? null,
+    speech: a.speech ?? null,
     rmsDb: a.rmsDb ?? null,
     breakCuts: cut.breakCuts,
     blackCuts: cut.blackCuts,
@@ -335,6 +353,16 @@ function record() {
   };
   const d = decision.step(signals);
   lastDecision = d;
+  // Don't learn the scoreboard from a commercial: start the learning window over once it's muted.
+  if (!v.learned && d.muted) overlay.resetStats();
+  if (!v.learned || !d.absentSecs || d.muted) lostSecs = 0;
+  else if (d.gameAudio != null && d.gameAudio >= LOST_GAME_AUDIO) lostSecs++;
+  if (lostSecs >= LOST_SCOREBOARD_S) {
+    lostSecs = 0;
+    overlay.reset();
+    lastOcrLearn = 0;
+    pushState({ flash: 'Scoreboard moved: relearning it' });
+  }
   if (controller.tick(d.muted, signals.presence)) {
     applyMute();
     pushState();

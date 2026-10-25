@@ -4,7 +4,6 @@
 // segment or halftime show (all of which you want to hear). The deciding signal is whether the
 // audio still sounds like this broadcast (learned while the scoreboard is up). Music,
 // black+silent cuts, persistent graphics and on-screen text only nudge the result.
-// Tuned to prefer missing the start of a break over muting live play.
 
 (function (root) {
   const clamp01 = (x) => Math.max(0, Math.min(1, x));
@@ -13,19 +12,27 @@
   const ABSENT = 0.4; // below this counts as "gone"
   const REPLAY_MAX_S = 10; // absence shorter than this contributes nothing
   const ABSENCE_FULL_S = 40; // absence this long is fully "not a replay"
-  // Decision timing (tuned on three labeled games: two college, one NFL).
+  // Decision timing. Tuned on three labeled games (two college, one NFL), then tightened on a
+  // labeled college basketball game where the scoreboard was lost after the first break, so the
+  // audio alone had to decide: mute within ~1-3 s of the break, no mutes during play.
   const DEFAULTS = {
     muteP: 0.75, // ad probability needed...
-    muteAfterS: 7, // ...for this many consecutive seconds
-    minAbsentS: 10, // and the scoreboard gone at least this long: broadcasts play ~10-15 s of lead-in
-    //                 music before the ads, which sounds just like an ad
-    unmuteGameAudio: 0.7, // average "sounds like the broadcast" level counted as back...
-    unmuteWindowS: 10, // ...over this many seconds, while the scoreboard is still gone (e.g. halftime
-    //                    show after ads). Long enough that talky ads don't trigger it.
+    muteAfterS: 2, // ...for this many consecutive seconds
+    minAbsentS: 3, // and the scoreboard gone at least this long (the music lead-in into a break counts
+    //                as the break)
+    unmuteGameAudio: 0.7, // "sounds like the broadcast" level for one second...
+    unmuteNeed: 5, // ...reached in at least this many...
+    unmuteWindowS: 6, // ...of the last this many seconds, while the scoreboard is still gone (e.g.
+    //                   halftime show after ads). Talky ads sound like the game in 2-4 s bursts;
+    //                   the game coming back stays there.
     unmuteScoreboardS: 1, // or the scoreboard visible this long
     logoVisible: 0.8, // a single learned graphic (channel logo / part of the score bar) this visible
     //                  also counts as "game is on": 88-93% during play, rarely above 30% in ads
-    windowS: 4, // smoothing window for the audio signals
+    windowS: 3, // smoothing window for the audio signals
+    cutMuteS: 20, // a black+silent cut this soon after the scoreboard left mutes at once (black frames
+    //               only showed up at break boundaries and between ads, never during play)
+    ambientS: 30, // during the first this many seconds of an absence (replays, dead balls), sound with
+    //               neither speech nor music (crowd, squeaks) counts as neither game nor ad
   };
   const SILENCE_DB = -50;
 
@@ -237,22 +244,29 @@
       this.gameWin = [];
       this.unmuteWin = [];
       this.musicWin = [];
+      this.lastBreakCuts = 0;
+      this.cutAgo = Infinity;
     }
 
-    // Call once per second. s: { learned, presence, logoPresence, audioGame, music, rmsDb,
+    // Call once per second. s: { learned, presence, logoPresence, audioGame, music, speech, rmsDb,
     //   breakCuts, blackCuts, persistentPx, ocrHit }
     step(s) {
       const vis = s.learned && s.presence != null;
       const logoOn = vis && this.cfg.logoVisible != null && s.logoPresence != null && s.logoPresence >= this.cfg.logoVisible;
       const seen = vis && (s.presence >= PRESENT || logoOn); // broadcast graphics on screen
-      if (!vis || seen) this.absentSecs = 0;
-      else if (s.presence < ABSENT) this.absentSecs++;
+      // Presence is briefly unknown right after a graphic is added to the learned scoreboard: hold.
+      if (!s.learned || seen) this.absentSecs = 0;
+      else if (vis && s.presence < ABSENT) this.absentSecs++;
 
       const push = (win, v) => {
         if (v != null) win.push(v);
         if (win.length > this.cfg.windowS) win.shift();
       };
-      const silent = s.rmsDb != null && s.rmsDb < SILENCE_DB;
+      const ambient = this.absentSecs < this.cfg.ambientS && s.speech != null && s.speech < 0.2 && (s.music ?? 0) < 0.2;
+      const silent = (s.rmsDb != null && s.rmsDb < SILENCE_DB) || ambient;
+      // Seconds since the last black+silent cut (the count only goes up when a new one happens).
+      this.cutAgo = s.breakCuts > this.lastBreakCuts ? 0 : this.cutAgo + 1;
+      this.lastBreakCuts = s.breakCuts;
       push(this.gameWin, silent ? null : s.audioGame);
       push(this.musicWin, silent ? null : s.music);
       this.unmuteWin.push(silent ? null : s.audioGame);
@@ -288,6 +302,12 @@
 
       if (!this.muted) {
         this.adSecs = out.pAd >= this.cfg.muteP ? this.adSecs + 1 : 0;
+        // The cut often comes a second or two before the scoreboard fades out.
+        const gone = vis && s.presence < ABSENT && this.absentSecs <= this.cfg.cutMuteS;
+        if (gone && this.cutAgo <= 5) {
+          this.adSecs = this.cfg.muteAfterS;
+          this.cutAgo = Infinity;
+        }
         if (this.adSecs >= this.cfg.muteAfterS) {
           this.muted = true;
           this.backSecs = 0;
@@ -295,10 +315,10 @@
         }
       } else {
         this.backSecs = seen ? this.backSecs + 1 : 0;
-        // Scoreboard still gone: unmute only if the broadcast audio has been back for a while.
-        const vals = this.unmuteWin.filter((g) => g != null);
-        const full = this.unmuteWin.length >= this.cfg.unmuteWindowS && vals.length >= this.cfg.unmuteWindowS / 2;
-        const showBack = gameAudio != null ? full && mean(vals) >= this.cfg.unmuteGameAudio : out.pAd < 0.35;
+        // Scoreboard still gone: unmute only if the broadcast audio has been back for most of a few seconds.
+        const back = this.unmuteWin.filter((g) => g != null && g >= this.cfg.unmuteGameAudio).length;
+        // No game sound learned yet: only the scoreboard can tell the game is back.
+        const showBack = gameAudio != null && back >= this.cfg.unmuteNeed;
         if (this.backSecs >= this.cfg.unmuteScoreboardS || showBack) {
           this.muted = false;
           this.adSecs = 0;
