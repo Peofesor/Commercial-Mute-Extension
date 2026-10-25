@@ -4,7 +4,8 @@
 //                                        (auto-mute works again once the detector says the break is over)
 //   hotkey while not muted            -> mute manually until you press again, or the scoreboard
 //                                        disappears and comes back; with the scoreboard gone, what's
-//                                        playing is learned as a commercial
+//                                        playing is learned as a commercial, and the mute also ends
+//                                        when the detector (once it mutes too) says the break is over
 //   Wrong!                            -> same as the hotkey, logged as a detector mistake, and (while
 //                                        muted) what's playing is learned as "not a commercial"
 //   Pause                             -> no auto-mute until resumed
@@ -20,6 +21,7 @@
       this.muted = false;
       this.sawAbsent = false;
       this.manualInBreak = false; // manual mute pressed while the scoreboard was gone
+      this.detectorCaughtUp = false; // ...and the detector has muted since
       this.wrongSkip = false; // current 'skip' came from Wrong!: what's playing is not a commercial
       this.events = [];
     }
@@ -31,6 +33,10 @@
       if (this.override === 'manual') {
         if (presence != null && presence < ABSENT) this.sawAbsent = true;
         if (this.sawAbsent && presence != null && presence >= PRESENT) this.override = null;
+        // Muted during a break (a commercial it missed or unmuted too early): once the detector has caught
+        // up and then says the break is over, it ends too, instead of waiting for the scoreboard.
+        if (this.manualInBreak && detectorMuted) this.detectorCaughtUp = true;
+        if (this.manualInBreak && this.detectorCaughtUp && !detectorMuted) this.override = null;
       }
       const want = this.override === 'manual' ? true : this.override === 'skip' ? false : this.autoEnabled && detectorMuted;
       return this.set(want, want ? 'auto-mute' : 'auto-unmute');
@@ -47,6 +53,7 @@
       this.wrongSkip = false;
       this.sawAbsent = presence != null && presence < ABSENT;
       this.manualInBreak = this.sawAbsent;
+      this.detectorCaughtUp = false;
       return this.set(true, wrong ? 'wrong-unmute' : 'user-mute', true);
     }
 
